@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.login-station
+#
+# Custom image extending linuxserver/chromium to embed the auth-proxy
+# Node.js service alongside Chrome. The auth-proxy connects to the SAME
+# Chrome instance (localhost:9222) that the user logs into via KasmVNC,
+# so cookies/sessions are shared automatically.
+#
+# s6-rc manages both services: Chrome (from base image) + auth-proxy (added here).
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM lscr.io/linuxserver/chromium:latest
+
+# Install Node.js 22 for auth-proxy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/log/lastlog /var/log/faillog \
+              /var/cache/apt/archives/* \
+              /var/lib/apt/lists/*
+
+# Copy auth-proxy Node.js app
+WORKDIR /app
+COPY auth-proxy/package*.json ./
+RUN npm install --omit=dev
+COPY auth-proxy/auth-proxy.js ./
+
+# Add s6-rc service for auth-proxy.
+# s6-rc type=longrun → managed like a daemon, logs to /var/log/s6-rc.
+# dependencies.d/svc-de → ensures auth-proxy starts AFTER Chrome is up.
+COPY docker/s6-auth-proxy /etc/s6-overlay/s6-rc.d/svc-auth-proxy/
+RUN touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-auth-proxy
+
+EXPOSE 3100 9224

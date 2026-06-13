@@ -1,0 +1,15 @@
+{
+  "name": "auth-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CDP-based authenticated scraping proxy for browserless login station",
+  "scripts": {
+    "start": "node auth-proxy.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "puppeteer-core": "^22.0.0",
+    "ws": "^8.18.0"
+  }
+}

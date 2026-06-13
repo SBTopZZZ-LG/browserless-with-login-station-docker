@@ -1,0 +1,22 @@
+#!/usr/bin/with-contenv bash
+# s6-rc service run script for auth-proxy.
+# with-contenv sources the linuxserver/chromium environment variables
+# so CHROME_CLI and other vars are available.
+
+AUTH_PROXY_DIR="/app"
+AUTH_PROXY_PORT="${AUTH_PROXY_PORT:-3100}"
+
+echo "[svc-auth-proxy] Waiting for Chrome CDP to be ready on 127.0.0.1:9222..."
+
+# Poll up to 90s for Chrome CDP
+for i in $(seq 1 90); do
+  if curl -sf http://127.0.0.1:9222/json/version > /dev/null 2>&1; then
+    echo "[svc-auth-proxy] Chrome CDP ready after ${i}s"
+    break
+  fi
+  sleep 1
+done
+
+echo "[svc-auth-proxy] Starting auth-proxy on port ${AUTH_PROXY_PORT}..."
+cd "${AUTH_PROXY_DIR}"
+exec s6-setuidgid abc node auth-proxy.js

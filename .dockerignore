@@ -1,0 +1,33 @@
+# Keep the build context lean — only include files needed inside the images
+
+# Git
+.git/
+# Environment (contains secrets — never bake into image)
+.env
+.env.*
+!.env.example
+
+# Docs & project files
+README.md
+LICENSE
+*.md
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker build artifacts (regenerated at build time)
+node_modules/
+
+# Misc
+*.bak
+*.tmp
