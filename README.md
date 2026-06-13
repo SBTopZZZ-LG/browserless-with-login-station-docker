@@ -13,34 +13,9 @@ When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, the `br
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        login-station container                        │
-│                                                                       │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
-│  │  Chrome/Chromium │  │   Auth-Proxy     │  │  CDP WS Proxy      │  │
-│  │  :9222 (CDP HTTP)│  │  :3100 (HTTP API)│  │  :9224 (WS tunnel) │  │
-│  └────────┬────────┘  └────────┬─────────┘  └─────────┬──────────┘  │
-│           │                    │                      │              │
-│           │   Same Chrome instance                    │              │
-│           │   Same cookies/sessions                   │              │
-│           └────────────────────┼─────────────────────┘              │
-│                                │                                      │
-│                     You log in via KasmVNC                           │
-│                     → cookies automatically shared                   │
-└────────────────────────────────┼─────────────────────────────────────┘
-                                 │
-                   CONNECTION_WS_ENDPOINT=ws://login-station:9224/
-                                 │
-┌────────────────────────────────┴─────────────────────────────────────┐
-│                         browserless container                         │
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │  Headless Chrome (Playwright-compatible WebSocket API)         │  │
-│  │  Inherits authenticated sessions from login-station Chrome     │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────┘
-```
+> **Interactive diagram:** [Open in Excalidraw](https://excalidraw.saumitra1912.com) — or import `docs/architecture-diagram.excalidraw.json` into any Excalidraw instance.
+
+![Architecture diagram](docs/architecture-diagram.excalidraw.json)
 
 ### Why this works
 
@@ -295,6 +270,8 @@ docker network inspect nginx-proxy
 ├── nginx/
 │   ├── browserless.conf            # Nginx config for browserless.YOUR_DOMAIN
 │   └── login-browserless.conf      # Nginx config for login.YOUR_DOMAIN + scrape.YOUR_DOMAIN
+├── docs/
+│   └── architecture-diagram.excalidraw.json  # Interactive Excalidraw architecture diagram
 ├── .env.example                    # Environment template
 ├── .gitignore
 ├── .dockerignore
