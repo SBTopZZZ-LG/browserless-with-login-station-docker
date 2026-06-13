@@ -15,7 +15,7 @@ When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, the `br
 
 > **Interactive diagram:** [Open in Excalidraw](https://excalidraw.saumitra1912.com) — or import `docs/architecture-diagram.excalidraw.json` into any Excalidraw instance.
 
-![Architecture diagram](docs/architecture-diagram.jpg)
+![Architecture diagram](docs/architecture-diagram.png)
 
 ### Why this works
 
@@ -271,7 +271,7 @@ docker network inspect nginx-proxy
 │   ├── browserless.conf            # Nginx config for browserless.YOUR_DOMAIN
 │   └── login-browserless.conf      # Nginx config for login.YOUR_DOMAIN + scrape.YOUR_DOMAIN
 ├── docs/
-│   ├── architecture-diagram.jpg          # PNG render of the architecture diagram
+│   ├── architecture-diagram.png          # PNG export of the architecture diagram
 │   └── architecture-diagram.excalidraw.json  # Interactive Excalidraw source
 ├── .env.example                    # Environment template
 ├── .gitignore
