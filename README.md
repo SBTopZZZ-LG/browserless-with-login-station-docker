@@ -28,12 +28,9 @@ CDP bypasses this entirely: we connect directly to the Chrome instance that hold
 ## Prerequisites
 
 - **Docker** (v24+) with Docker Compose v2
-- **Docker network `nginx-proxy`** — create it with:
-  ```bash
-  docker network create nginx-proxy
-  ```
-- **SSL certificates** — Generate via Let's Encrypt (DNS-01 challenge) or bring your own
-- **Nginx reverse proxy** — with volume mounts for your SSL certs (see [Nginx Setup](#nginx-setup))
+- **OpenSSL** — to generate a browserless token: `openssl rand -hex 32`
+
+No external nginx-proxy, no SSL certs, no DNS records needed for local development.
 
 ---
 
@@ -50,13 +47,11 @@ cd browserless-with-login-station-docker
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum set:
-#   DOMAIN                  (your domain)
-#   BROWSERLESS_DOMAIN      (e.g. browserless.yourdomain.com)
-#   LOGIN_DOMAIN            (e.g. login.yourdomain.com)
-#   SCRAPE_DOMAIN           (e.g. scrape.yourdomain.com)
-#   BROWSERLESS_TOKEN       (openssl rand -hex 32)
+# At minimum set BROWSERLESS_TOKEN:
+#   BROWSERLESS_TOKEN=$(openssl rand -hex 32)
 ```
+
+**That's it for local development** — `USE_SSL=false` is the default. Everything runs on `127.0.0.1` with plain HTTP.
 
 ### 3. Build the login-station image
 
@@ -72,12 +67,12 @@ docker compose up -d
 
 ### 5. Sign in
 
-Open `https://login.YOUR_DOMAIN` in your browser → log into any site (LinkedIn, GitHub, etc.) → wait a few seconds for cookies to settle.
+Open `http://127.0.0.1:3100` in your browser → log into any site (LinkedIn, GitHub, etc.) → wait a few seconds for cookies to settle.
 
 ### 6. Test authenticated scraping
 
 ```bash
-# Via auth-proxy scrape API (uses same Chrome session)
+# Via auth-proxy scrape API
 curl -X POST http://127.0.0.1:3100/scrape \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.linkedin.com/feed/","waitAfter":5000}'
@@ -88,21 +83,52 @@ curl -X POST http://127.0.0.1:3100/scrape \
 
 ---
 
+## Production Mode (HTTPS)
+
+To enable HTTPS, set these in `.env`:
+
+```bash
+USE_SSL=true
+DOMAIN=yourdomain.com
+LOGIN_DOMAIN=login.yourdomain.com
+SCRAPE_DOMAIN=scrape.yourdomain.com
+BROWSERLESS_DOMAIN=browserless.yourdomain.com
+SSL_CERT_PATH=/path/to/fullchain.pem
+SSL_KEY_PATH=/path/to/privkey.pem
+```
+
+Then start with the `ssl` profile:
+
+```bash
+# Build image
+docker compose build login-station
+
+# Start all services including nginx (TLS on 80/443)
+docker compose --profile ssl up -d
+```
+
+Create DNS A records pointing to your server for `login.`, `scrape.`, and `browserless.` subdomains, then generate SSL certificates (e.g. Let's Encrypt with DNS-01 challenge).
+
+---
+
 ## Services
 
 ### Login Station (`login-station`)
 
 | Port | Service | Description |
 |------|---------|-------------|
-| 3100 | Auth-Proxy HTTP | Authenticated scrape REST API |
+| 3100 | KasmVNC + Auth-Proxy | Web UI + authenticated scrape API |
 | 9224 | CDP WS Proxy | WebSocket tunnel to Chrome (for `CONNECTION_WS_ENDPOINT`) |
-| 3000 | KasmVNC | Web interface (nginx routes `login.` subdomain here) |
 
 ### Browserless (`browserless`)
 
 | Port | Service | Description |
 |------|---------|-------------|
 | 3000 | Browserless WS API | Headless Chrome for Playwright/MCP clients |
+
+### Nginx (`nginx-proxy`) — production only
+
+Started with `--profile ssl`. Routes HTTPS subdomains to the above services.
 
 ---
 
@@ -160,33 +186,25 @@ ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
 
 ---
 
-## Nginx Setup
+## Nginx Setup (built-in, production mode)
 
-This repo includes nginx config templates in `nginx/`. Copy them to your nginx-proxy `conf.d/` directory and update:
+nginx is included in this repo as a containerized reverse proxy. It is **only started when `USE_SSL=true`** (`--profile ssl`).
 
-1. **`server_name`** — set your subdomains
-2. **`ssl_certificate` / `ssl_certificate_key`** — paths to your SSL certs
-3. Add cert volume mounts to your nginx `docker-compose.yml`
+Templates in `nginx/`:
+- **`nginx.conf.http`** — HTTP-only config for local dev
+- **`nginx.conf.https`** — HTTPS config with TLS termination
+- **`setup.sh`** — selects and starts the right config at runtime
 
-```bash
-# Example: add these volumes to your nginx-proxy service
-volumes:
-  - /etc/letsencrypt/live/browserless.YOUR_DOMAIN:/etc/ssl/certs/browserless:ro
-  - /etc/letsencrypt/live/login.YOUR_DOMAIN:/etc/ssl/certs/login-browserless:ro
-  - /etc/letsencrypt/live/scrape.YOUR_DOMAIN:/etc/ssl/certs/scrape-browserless:ro
-
-# Restart nginx
-docker compose -f nginx-proxy/docker-compose.yml restart nginx
-```
+SSL cert paths are passed via `SSL_CERT_PATH` / `SSL_KEY_PATH` env vars and volume-mounted into the nginx container. See `.env.example` for the full set of SSL-related variables.
 
 ### DNS Records
 
-Create CNAME records pointing to your server:
+Create A/CNAME records pointing to your server:
 
 ```
-browserless  IN CNAME  pi5.YOUR_DOMAIN.   (or your server A record)
-login        IN CNAME  pi5.YOUR_DOMAIN.
-scrape       IN CNAME  pi5.YOUR_DOMAIN.
+login        IN CNAME  your-server.
+scrape       IN CNAME  your-server.
+browserless  IN CNAME  your-server.
 ```
 
 ---
@@ -195,16 +213,23 @@ scrape       IN CNAME  pi5.YOUR_DOMAIN.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BROWSERLESS_TOKEN` | *(required)* | Secret token for browserless API auth |
-| `BROWSERLESS_DOMAIN` | *(required)* | Subdomain for browserless WS API |
-| `LOGIN_DOMAIN` | *(required)* | Subdomain for KasmVNC login UI |
-| `SCRAPE_DOMAIN` | *(required)* | Subdomain for auth-proxy scrape API |
+| `USE_SSL` | `false` | Set `true` to enable HTTPS via nginx (use `--profile ssl`) |
+| `DOMAIN` | — | Top-level domain (used to build subdomain defaults) |
+| `LOGIN_DOMAIN` | `login.${DOMAIN}` | Subdomain for KasmVNC web UI |
+| `SCRAPE_DOMAIN` | `scrape.${DOMAIN}` | Subdomain for auth-proxy scrape API |
+| `BROWSERLESS_DOMAIN` | `browserless.${DOMAIN}` | Subdomain for browserless WS API |
+| `SSL_CERT_PATH` | — | Path to SSL fullchain.pem (required when `USE_SSL=true`) |
+| `SSL_KEY_PATH` | — | Path to SSL privkey.pem (required when `USE_SSL=true`) |
+| `BROWSERLESS_TOKEN` | *(set in .env)* | Secret token for browserless API auth |
 | `PUID` / `PGID` | 1000 | User/group ID for file permissions |
-| `TZ` | Asia/Kolkata | Timezone |
+| `TZ` | `UTC` | Timezone |
 | `DISPLAY_WIDTH` | 1920 | KasmVNC display width |
 | `DISPLAY_HEIGHT` | 1080 | KasmVNC display height |
 | `BROWSERLESS_CONCURRENT` | 5 | Max concurrent browser sessions |
 | `BROWSERLESS_TIMEOUT` | 600000 | Session timeout (ms) |
+| `AUTH_PROXY_HOST_PORT` | `127.0.0.1:3100` | Host port for auth-proxy / KasmVNC |
+| `CDP_HOST_PORT` | `127.0.0.1:9224` | Host port for CDP WebSocket proxy |
+| `BROWSERLESS_HOST_PORT` | `127.0.0.1:3000` | Host port for browserless headless API |
 
 ---
 
@@ -212,13 +237,16 @@ scrape       IN CNAME  pi5.YOUR_DOMAIN.
 
 ```bash
 # Check containers are running
-docker ps --filter "name=browserless"
+docker ps --filter "name=browserless,login-station"
 
 # Check login station logs
 docker logs login-station --tail 50
 
 # Check browserless logs
 docker logs browserless --tail 50
+
+# Check nginx logs (when USE_SSL=true)
+docker logs nginx-proxy --tail 50
 
 # Verify Chrome CDP is reachable from auth-proxy
 curl http://127.0.0.1:9224/json/version | python3 -m json.tool
@@ -228,9 +256,6 @@ curl http://127.0.0.1:3100/health
 
 # Health check browserless
 curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
-
-# Check Docker network
-docker network inspect nginx-proxy
 ```
 
 ### Login station returning blank / black screen
@@ -256,8 +281,10 @@ docker network inspect nginx-proxy
 
 ```
 .
-├── docker-compose.yml              # Main compose (both services)
+├── docker-compose.yml              # Main compose — local dev + production modes
+│                                 # Start with --profile ssl for HTTPS
 ├── Dockerfile.login-station       # Custom image: linuxserver/chromium + auth-proxy
+├── setup.sh                       # nginx entrypoint — picks HTTP or HTTPS config
 ├── auth-proxy/
 │   ├── auth-proxy.js               # Node.js: CDP scrape API + WS proxy
 │   └── package.json
@@ -268,16 +295,54 @@ docker network inspect nginx-proxy
 │       └── dependencies.d/
 │           └── svc-de             # Empty — tells s6 this depends on Chrome
 ├── nginx/
-│   ├── browserless.conf            # Nginx config for browserless.YOUR_DOMAIN
-│   └── login-browserless.conf      # Nginx config for login.YOUR_DOMAIN + scrape.YOUR_DOMAIN
+│   ├── nginx.conf.http            # HTTP-only config (USE_SSL=false)
+│   ├── nginx.conf.https           # HTTPS config with TLS (USE_SSL=true)
+│   └── proxy-headers.conf         # Shared proxy header snippet
 ├── docs/
 │   ├── architecture-diagram.png          # PNG export of the architecture diagram
 │   └── architecture-diagram.excalidraw.json  # Interactive Excalidraw source
-├── .env.example                    # Environment template
+├── .github/
+│   └── workflows/
+│       └── build-push.yml         # CI: builds login-station, pushes to GHCR
+├── .env.example                   # Environment template
 ├── .gitignore
 ├── .dockerignore
 └── README.md
 ```
+
+---
+
+## Deploying to GHCR
+
+This repo includes a GitHub Actions workflow that builds and pushes the `login-station` image to GHCR.
+
+### Setup
+
+1. **Fork this repo** (or push to your own GitHub repo)
+2. **Update `GITHUB_REPO`** in `.env.example` to your GitHub handle
+3. The workflow auto-authenticates to GHCR via GitHub's OIDC — no secrets needed
+
+### Image tags
+
+| Trigger | Tags |
+|---------|------|
+| Push to `main` | `latest`, `sha-<sha7>` |
+| Tag `v1.2.3` | `v1.2.3`, `v1.2`, `v1`, `latest` |
+| Pull request | builds but does **not** push |
+
+### Using the GHCR image in production
+
+In your `docker-compose.yml`, comment out the `build:` block on the `login-station` service and uncomment the `image:` line with your GHCR URL:
+
+```yaml
+login-station:
+  # build:
+  #   context: .
+  #   dockerfile: Dockerfile.login-station
+  image: ghcr.io/YOUR_HANDLE/browserless-login-station:latest
+```
+
+Then `docker compose pull` to fetch the latest image.
 
 ---
 

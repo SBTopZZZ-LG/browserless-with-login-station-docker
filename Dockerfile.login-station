@@ -6,10 +6,27 @@
 # Chrome instance (localhost:9222) that the user logs into via KasmVNC,
 # so cookies/sessions are shared automatically.
 #
-# s6-rc manages both services: Chrome (from base image) + auth-proxy (added here).
+# Build args (set automatically by CI when pushed to GHCR):
+#   BUILD_DATE  — ISO-8601 timestamp of the build
+#   VCS_REF     — git SHA of the commit
+#
+# s6-rc manages both services: Chrome (from base) + auth-proxy (added here).
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM lscr.io/linuxserver/chromium:latest
+
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+
+# OCI Image Spec labels (required for GHCR / docker hub)
+LABEL org.opencontainers.image.title="browserless-login-station"
+LABEL org.opencontainers.image.description="Headless Chrome with login station — authenticated browser sessions via CDP, no cookie extraction needed."
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.source="https://github.com/${GITHUB_REPO}/browserless-with-login-station-docker"
+LABEL org.opencontainers.image.version="${VCS_REF}"
+LABEL org.opencontainers.image.ref.name="login-station"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL maintainer="browserless-with-login-station-docker"
 
 # Install Node.js 22 for auth-proxy
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -2,36 +2,26 @@
 # Browserless + Login Station — docker-compose.yml
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# This compose brings up two containers that share the SAME Chrome instance:
+# Two modes:
 #
-#   browserless        — Headless Chrome API (WS endpoint for Playwright/MCP)
-#   login-station     — KasmVNC login UI + auth-proxy (CDP-based scrape API)
+#   LOCAL DEV  (USE_SSL=false, default)
+#     → No SSL/TLS, no nginx. Direct HTTP access via localhost.
+#     → Browserless: http://127.0.0.1:3000
+#     → Login UI:   http://127.0.0.1:3100
+#     → Scrape API: http://127.0.0.1:3100/scrape
 #
-# Both share cookies/sessions because auth-proxy connects to the Chrome that
-# runs inside login-station via CDP. No cookie extraction needed.
-#
-# ┌─────────────────────────────────────────────────────────────────────┐
-# │                         login-station                               │
-# │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐   │
-# │  │ Chrome       │  │ Auth-Proxy   │  │ CDP WebSocket Proxy      │   │
-# │  │ :9222 (CDP)  │  │ :3100 (HTTP) │  │ :9224 (WS tunneling)     │   │
-# │  └──────────────┘  └──────────────┘  └──────────────────────────┘   │
-# └─────────────────────────────────────────────────────────────────────┘
-#                                ▲
-#                                │ CONNECTION_WS_ENDPOINT
-# ┌─────────────────────────────┴─────────────────────────────────────┐
-# │ browserless                                                       │
-# │  ┌─────────────────────────────────────────────────────────────┐  │
-# │  │  Headless Chrome (Playwright-compatible WS API)              │  │
-# │  │  Authenticated sessions are inherited from login-station      │  │
-# │  └─────────────────────────────────────────────────────────────┘  │
-# └─────────────────────────────────────────────────────────────────────┘
+#   PRODUCTION (USE_SSL=true)
+#     → nginx reverse proxy with TLS termination
+#     → Configure DOMAIN + SSL_CERT_PATH + SSL_KEY_PATH in .env
+#     → Routes: https://login.DOMAIN, https://scrape.DOMAIN,
+#               https://browserless.DOMAIN
 #
 # Usage:
-#   1. Copy .env.example to .env and fill in your values
-#   2. docker compose up -d
-#   3. Open https://login.YOUR_DOMAIN in browser → sign into any site
-#   4. Use auth-proxy /scrape endpoint for authenticated scraping
+#   cp .env.example .env
+#   # Edit .env — set USE_SSL=true and fill in DOMAIN/SSL paths for prod
+#   docker compose up -d
+#   # Open http://127.0.0.1:3100 → sign into any site via KasmVNC
+#   # Then use browserless at http://127.0.0.1:3000 with Playwright/MCP
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -42,28 +32,29 @@ services:
     image: ghcr.io/browserless/chromium:latest
     container_name: browserless
     restart: unless-stopped
+
+    # Always expose on localhost — direct HTTP when no SSL,
+    # or as upstream for nginx when SSL is active
     ports:
-      # Expose on host only (localhost) — access via nginx reverse proxy
-      - "127.0.0.1:3000:3000"
+      - "${BROWSERLESS_HOST_PORT:-127.0.0.1:3000}:3000"
+
     environment:
-      # Server binding
       - HOST=0.0.0.0
       - PORT=3000
+      - TOKEN=${BROWSERLESS_TOKEN:-}
 
-      # Authentication — set BROWSERLESS_TOKEN in .env
-      - TOKEN=${BROWSERLESS_TOKEN}
+      # CDP WebSocket endpoint — inherits sessions from login-station Chrome
+      # Protocol switches between ws:// (local) and wss:// (SSL/production)
+      - CONNECTION_WS_ENDPOINT=${CONNECTION_WS_ENDPOINT:-ws://login-station:9224/}
 
-      # Connection to login-station Chrome (CDP WebSocket proxy)
-      # Makes headless sessions inherit cookies/sessions from login station
-      - CONNECTION_WS_ENDPOINT=ws://login-station:9224/
+      # External URL — tells browserless its public facing URL
+      - EXTERNAL=${BROWSERLESS_EXTERNAL_URL:-http://127.0.0.1:3000}
 
       # Session limits
       - CONCURRENT=${BROWSERLESS_CONCURRENT:-5}
       - MAX_CONCURRENT_SESSIONS=${BROWSERLESS_MAX_SESSIONS:-5}
       - QUEUED=${BROWSERLESS_QUEUED:-10}
       - MAX_QUEUE_LENGTH=${BROWSERLESS_MAX_QUEUE:-10}
-
-      # Timeouts (ms)
       - TIMEOUT=${BROWSERLESS_TIMEOUT:-600000}
 
       # Keep Chrome alive between requests for faster reuse
@@ -78,9 +69,6 @@ services:
       - MAX_MEMORY_PERCENT=${BROWSERLESS_MAX_MEMORY:-80}
       - MAX_CPU_PERCENT=${BROWSERLESS_MAX_CPU:-80}
 
-      # External URL — update EXTERNAL_DOMAIN in .env
-      - EXTERNAL=https://${BROWSERLESS_DOMAIN}
-
       # Directories
       - DOWNLOAD_DIR=/downloads
       - DATA_DIR=/user_data
@@ -94,12 +82,12 @@ services:
       - browserless_data:/user_data
 
     networks:
-      - nginx-proxy
+      - login-station-net
 
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "10m"
+        max-size: 10m
         max-file: "3"
 
     cap_add:
@@ -115,23 +103,33 @@ services:
       start_period: 30s
 
 
-  # ── Login Station (Manual sign-in + authenticated scrape API) ───────────
+  # ── Login Station (KasmVNC + auth-proxy) ─────────────────────────────────
   login-station:
+    # Build args for OCI image labels (used by CI when pushing to GHCR)
     build:
       context: .
       dockerfile: Dockerfile.login-station
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
+        - VCS_REF=${VCS_REF:-local}
+        - GITHUB_REPO=${GITHUB_REPO:-local}
+    # To use a pre-built image from GHCR instead of building locally, comment out
+    # the build: block above and uncomment this line (fill in your details):
+    # image: ghcr.io/YOUR_HANDLE/browserless-login-station:latest
     container_name: login-station
     restart: unless-stopped
+
     ports:
-      # Auth-proxy HTTP API
-      - "127.0.0.1:3100:3100"
-      # CDP WebSocket proxy (for browserless CONNECTION_WS_ENDPOINT)
-      - "127.0.0.1:9224:9224"
+      # Auth-proxy scrape API + KasmVNC web UI (same port inside container)
+      - "${AUTH_PROXY_HOST_PORT:-127.0.0.1:3100}:3100"
+      # CDP WebSocket proxy — browserless connects here for session inheritance
+      - "${CDP_HOST_PORT:-127.0.0.1:9224}:9224"
+
     environment:
       # Linuxserver/Chromium standard vars
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - TZ=${TZ:-Asia/Kolkata}
+      - TZ=${TZ:-UTC}
       - TITLE=${LOGIN_STATION_TITLE:-Browserless Login Station}
       - CHROME_CLI=--disable-gpu --window-size=${DISPLAY_WIDTH:-1920},${DISPLAY_HEIGHT:-1080} --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0
       - DISPLAY_WIDTH=${DISPLAY_WIDTH:-1920}
@@ -139,20 +137,23 @@ services:
       - DISPLAY_REFRESH=${DISPLAY_REFRESH:-60}
       - DARK_MODE=${DARK_MODE:-true}
 
-      # Auth-proxy port (matches the s6 service env)
+      # Auth-proxy port (matches s6 service env)
       - AUTH_PROXY_PORT=3100
+
+      # URL scheme for auth-proxy's response headers (http or https)
+      - PUBLIC_URL_SCHEME=${PUBLIC_URL_SCHEME:-http}
 
     volumes:
       - login_station_config:/config
       - /dev/shm:/dev/shm
 
     networks:
-      - nginx-proxy
+      - login-station-net
 
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "10m"
+        max-size: 10m
         max-file: "3"
 
     shm_size: 1gb
@@ -162,12 +163,62 @@ services:
       - "105"
 
 
-networks:
-  # Shared network — must match the network used by your nginx reverse proxy.
-  # The nginx-proxy network should be created with:
-  #   docker network create nginx-proxy
+  # ── Nginx reverse proxy (production only) ───────────────────────────────
+  # Only started when USE_SSL=true. Start with:
+  #   docker compose --profile ssl up -d
   nginx-proxy:
-    external: true
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    profiles:
+      - ssl
+
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+
+    environment:
+      - USE_SSL=${USE_SSL:-false}
+      - LOGIN_DOMAIN=${LOGIN_DOMAIN:-login.localhost}
+      - SCRAPE_DOMAIN=${SCRAPE_DOMAIN:-scrape.localhost}
+      - BROWSERLESS_DOMAIN=${BROWSERLESS_DOMAIN:-browserless.localhost}
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      - KASMVNC_PORT=${KASMVNC_PORT:-3100}
+      - AUTH_PROXY_PORT=${AUTH_PROXY_PORT:-3100}
+      - BROWSERLESS_PORT=${BROWSERLESS_PORT:-3000}
+
+    volumes:
+      - ./nginx/nginx.conf.http:/etc/nginx/nginx.conf.http:ro
+      - ./nginx/nginx.conf.https:/etc/nginx/nginx.conf.https:ro
+      - ./nginx/proxy-headers.conf:/etc/nginx/proxy-headers.conf:ro
+      - ./setup.sh:/setup.sh:ro
+      # Mount SSL certificates if USE_SSL=true
+      ${SSL_CERT_MOUNT:-}
+      ${SSL_KEY_MOUNT:-}
+
+    entrypoint: ["/setup.sh"]
+    depends_on:
+      login-station:
+        condition: service_started
+      browserless:
+        condition: service_started
+
+    networks:
+      - login-station-net
+
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+
+networks:
+  # Internal bridge network — all containers communicate over this.
+  # No external network dependency.
+  login-station-net:
+    driver: bridge
 
 
 volumes:

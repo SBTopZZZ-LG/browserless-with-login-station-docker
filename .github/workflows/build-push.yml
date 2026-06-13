@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# build-push.yml — Build and push login-station image to GHCR
+#
+# Triggers:
+#   • Push to main         → tags: latest + sha-XXXXXXXX
+#   • Version tag (v*)     → tags: vX.Y.Z + latest
+#   • Pull request         → builds but does NOT push
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build & Push login-station
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  build-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+
+    # Only push when triggered on main or a tag (not on PRs)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'main'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (labels, tags)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Short SHA tag for every build
+            type=sha,prefix=sha-,format=short
+
+            # latest — only on main branch
+            type=ref,event=branch
+
+            # Version tags: v1.2.3 → v1.2.3
+            type=semver,pattern={{version}}
+
+            # latest — also on version tags (so latest always points to newest)
+            type=semver,pattern={{major}}.{{minor}}.{{patch}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.login-station
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            VCS_REF=${{ github.sha }}
+
+  # ── Summary comment on PRs ───────────────────────────────────────────────
+  build-only:
+    name: Build (no push)
+    runs-on: ubuntu-latest
+    # Only runs on PRs — confirms the image builds without pushing
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.login-station
+          platforms: linux/amd64,linux/arm64
+          push: false
+          load: true
+          tags: build-test:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
