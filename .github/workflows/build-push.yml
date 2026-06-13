@@ -1,23 +1,28 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# build-push.yml — Build and push login-station image to GHCR
+# build-push.yml — Build, push, tag, and release login-station
 #
-# Triggers:
-#   • Push to main         → tags: latest + sha-XXXXXXXX
-#   • Version tag (v*)     → tags: vX.Y.Z + latest
-#   • Pull request         → builds but does NOT push
+# Triggered on every push to main.
+#
+# Release flow (version-gated, no manual tags needed):
+#   1. Read version from version.txt
+#   2. Check if git tag v<version> already exists
+#   3. If tag doesn't exist → build, push to GHCR, create git tag + GitHub release
+#   4. If tag already exists → skip (already released)
+#
+# To release a new version:
+#   1. Edit version.txt (e.g. 1.0.0 → 1.1.0)
+#   2. git add version.txt && git commit && git push
+#   3. CI handles the rest — build, push image, create git tag, create release
+#
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Build & Push login-station
+name: Release
 
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -25,23 +30,100 @@ env:
 
 jobs:
 
-  build-push:
-    name: Build & Push
+  # ── Determine if a release is needed ─────────────────────────────────────
+  check:
+    name: Check version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.tag_exists }}
+      prev_tag: ${{ steps.commits.outputs.prev_tag }}
+      prev_version: ${{ steps.commits.outputs.prev_version }}
+      commit_count: ${{ steps.commits.outputs.commit_count }}
+    steps:
+      - uses: actions/checkout@v4
 
-    # Only push when triggered on main or a tag (not on PRs)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'main'
+      - name: Read version from version.txt
+        id: read
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::version.txt is empty"
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version.txt must be a semantic version (e.g. 1.0.0), got: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION"
 
+      - name: Fetch all tags
+        run: git fetch --tags --force
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          TAG="${{ steps.read.outputs.tag }}"
+          if git rev-parse "$TAG^{tag}" >/dev/null 2>&1; then
+            echo "tag_exists=true"
+            echo "Tag $TAG already exists — skipping release"
+          else
+            echo "tag_exists=false"
+            echo "Tag $TAG does not exist — will release"
+          fi >> $GITHUB_OUTPUT
+
+      - name: Find previous version tag
+        id: commits
+        run: |
+          PREV_TAG=""
+          PREV_VERSION=""
+          CURRENT="${{ steps.read.outputs.version }}"
+          CURRENT_PARTS=(${CURRENT//./ })
+          CURRENT_MAJOR=${CURRENT_PARTS[0]}
+          CURRENT_MINOR=${CURRENT_PARTS[1]}
+
+          ALL_TAGS=$(git tag --list 'v*.*.*' --sort=-v:refname | head -20)
+
+          for T in $ALL_TAGS; do
+            VER="${T#v}"
+            PARTS=(${VER//./ })
+            M=${PARTS[0]}
+            N=${PARTS[1]}
+            if (( M < CURRENT_MAJOR )) || \
+               (( M == CURRENT_MAJOR && N < CURRENT_MINOR )); then
+              PREV_TAG="$T"
+              PREV_VERSION="$VER"
+              break
+            fi
+          done
+
+          if [[ -n "$PREV_TAG" ]]; then
+            COUNT=$(git rev-list --count "$PREV_TAG..HEAD")
+          else
+            COUNT=$(git rev-list --count HEAD)
+          fi
+
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
+          echo "commit_count=$COUNT" >> $GITHUB_OUTPUT
+
+  # ── Build, push, tag, release ────────────────────────────────────────────
+  release:
+    name: Build & Release
+    needs: check
+    runs-on: ubuntu-latest
+    if: needs.check.outputs.tag_exists == 'false'
     permissions:
-      contents: read
+      contents: write
       packages: write
+      attestations: write
+      id-token: write
 
     steps:
+      - uses: actions/checkout@v4
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU (for multi-arch builds)
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -54,25 +136,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (labels, tags)
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Short SHA tag for every build
-            type=sha,prefix=sha-,format=short
-
-            # latest — only on main branch
-            type=ref,event=branch
-
-            # Version tags: v1.2.3 → v1.2.3
-            type=semver,pattern={{version}}
-
-            # latest — also on version tags (so latest always points to newest)
-            type=semver,pattern={{major}}.{{minor}}.{{patch}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.check.outputs.version }}
+            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -80,7 +151,7 @@ jobs:
           context: .
           file: ./Dockerfile.login-station
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -89,28 +160,49 @@ jobs:
             BUILD_DATE=${{ env.BUILD_DATE }}
             VCS_REF=${{ github.sha }}
 
-  # ── Summary comment on PRs ───────────────────────────────────────────────
-  build-only:
-    name: Build (no push)
-    runs-on: ubuntu-latest
-    # Only runs on PRs — confirms the image builds without pushing
-    if: github.event_name == 'pull_request'
+      - name: Prepare release notes
+        run: |
+          VERSION="${{ needs.check.outputs.version }}"
+          PREV_TAG="${{ needs.check.outputs.prev_tag }}"
+          PREV_VERSION="${{ needs.check.outputs.prev_version }}"
+          COUNT="${{ needs.check.outputs.commit_count }}"
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          if [[ -n "$PREV_TAG" ]]; then
+            PREV_DISPLAY="since ${PREV_TAG} (${PREV_VERSION})"
+            LOG=$(git log "$PREV_TAG..HEAD" --oneline)
+          else
+            PREV_DISPLAY="(first release)"
+            LOG=$(git log --oneline)
+          fi
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          # Build release body
+          BODY="## What Changed"
+          BODY+="\n\n**$COUNT commit(s)** $PREV_DISPLAY"
+          BODY+="\n\n### Commit Log"
+          BODY+="\n\n\`\`\`\n${LOG}\n\`\`\`"
+          BODY+="\n\n### Image"
+          BODY+="\n\n\`\`\`bash"
+          BODY+="\ndocker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+          BODY+="\n\`\`\`"
+          BODY+="\n\n> \`latest\` tag always points to the most recent release."
 
-      - name: Build (no push)
-        uses: docker/build-push-action@v6
+          echo "$BODY" > release-body.txt
+          cat release-body.txt
+
+      - name: Create Git Tag
+        run: |
+          git tag "v${{ needs.check.outputs.version }}"
+          git push origin "v${{ needs.check.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: soft-props/action-gh-release@v1
         with:
-          context: .
-          file: ./Dockerfile.login-station
-          platforms: linux/amd64,linux/arm64
-          push: false
-          load: true
-          tags: build-test:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tag_name: v${{ needs.check.outputs.version }}
+          name: v${{ needs.check.outputs.version }}
+          body_path: release-body.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

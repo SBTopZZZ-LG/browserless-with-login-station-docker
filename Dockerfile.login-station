@@ -17,12 +17,13 @@ FROM lscr.io/linuxserver/chromium:latest
 
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
+ARG GITHUB_REPO=unknown
 
 # OCI Image Spec labels (required for GHCR / docker hub)
 LABEL org.opencontainers.image.title="browserless-login-station"
 LABEL org.opencontainers.image.description="Headless Chrome with login station — authenticated browser sessions via CDP, no cookie extraction needed."
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.source="https://github.com/${GITHUB_REPO}/browserless-with-login-station-docker"
+LABEL org.opencontainers.image.source="https://github.com/${GITHUB_REPO}"
 LABEL org.opencontainers.image.version="${VCS_REF}"
 LABEL org.opencontainers.image.ref.name="login-station"
 LABEL org.opencontainers.image.licenses="MIT"
