@@ -301,6 +301,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 ├── docs/
 │   ├── architecture-diagram.png          # PNG export of the architecture diagram
 │   └── architecture-diagram.excalidraw.json  # Interactive Excalidraw source
+├── version.txt                    # Version source of truth — bump here to trigger release
 ├── .github/
 │   └── workflows/
 │       └── build-push.yml         # CI: builds login-station, pushes to GHCR
@@ -314,23 +315,39 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 
 ## Deploying to GHCR
 
-This repo includes a GitHub Actions workflow that builds and pushes the `login-station` image to GHCR.
+This repo includes a GitHub Actions workflow that builds and releases the `login-station` image to GHCR.
 
-### Setup
+### Version management
 
-1. **Fork this repo** (or push to your own GitHub repo)
-2. **Update `GITHUB_REPO`** in `.env.example` to your GitHub handle
-3. The workflow auto-authenticates to GHCR via GitHub's OIDC — no secrets needed
+All version numbers live in **`version.txt`** at the repo root. The workflow reads this file to determine what to release — no manual git tags needed.
+
+| Action | Result |
+|--------|--------|
+| Edit `version.txt` + push | CI builds, pushes image, creates git tag + GitHub release |
+| Push without changing version | CI detects matching tag exists → skips release |
+| Push with `--profile ssl` | Builds again (no release) |
+
+### Release workflow
+
+1. `check` job reads `version.txt`, checks if `v<version>` tag already exists
+2. If tag missing → `release` job runs: multi-arch build → GHCR with `v<version>` + `latest` tags → git tag → GitHub release with commit log
+3. If tag exists → both jobs exit early (idempotent, safe to re-run)
 
 ### Image tags
 
-| Trigger | Tags |
-|---------|------|
-| Push to `main` | `latest`, `sha-<sha7>` |
-| Tag `v1.2.3` | `v1.2.3`, `v1.2`, `v1`, `latest` |
-| Pull request | builds but does **not** push |
+| Tag | When it's created |
+|-----|-------------------|
+| `v1.0.0`, `v1.0`, `v1` | On every new version |
+| `latest` | Always, on every release |
 
-### Using the GHCR image in production
+### First release
+
+The current `version.txt` is `1.0.0`. The workflow that just ran on this push will create:
+- GHCR image tagged `1.0.0` + `latest`
+- Git tag `v1.0.0`
+- GitHub release with the commit log
+
+### Using the GHCR image
 
 In your `docker-compose.yml`, comment out the `build:` block on the `login-station` service and uncomment the `image:` line with your GHCR URL:
 
@@ -341,8 +358,6 @@ login-station:
   #   dockerfile: Dockerfile.login-station
   image: ghcr.io/YOUR_HANDLE/browserless-login-station:latest
 ```
-
-Then `docker compose pull` to fetch the latest image.
 
 ---
 
