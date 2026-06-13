@@ -13,7 +13,7 @@ When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, the `br
 
 ## Architecture
 
-> **Interactive diagram:** [Open in Excalidraw](https://excalidraw.saumitra1912.com) — or import `docs/architecture-diagram.excalidraw.json` into any Excalidraw instance.
+> **Interactive diagram:** [Open in Excalidraw](https://excalidraw.com/) — or import `docs/architecture-diagram.excalidraw.json` into any Excalidraw instance.
 
 ![Architecture diagram](docs/architecture-diagram.png)
 
