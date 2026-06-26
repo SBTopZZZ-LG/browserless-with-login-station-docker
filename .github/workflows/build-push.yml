@@ -175,19 +175,25 @@ jobs:
             LOG=$(git log --oneline)
           fi
 
-          # Build release body
-          BODY="## What Changed"
-          BODY+="\n\n**$COUNT commit(s)** $PREV_DISPLAY"
-          BODY+="\n\n### Commit Log"
-          BODY+="\n\n\`\`\`\n${LOG}\n\`\`\`"
-          BODY+="\n\n### Image"
-          BODY+="\n\n\`\`\`bash"
-          BODY+="\ndocker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
-          BODY+="\n\`\`\`"
-          BODY+="\n\n> \`latest\` tag always points to the most recent release."
-
-          echo "$BODY" > release-body.txt
-          cat release-body.txt
+          printf "%s\n" \
+            "## What Changed" \
+            "" \
+            "**${COUNT} commit(s)** ${PREV_DISPLAY}" \
+            "" \
+            "### Commit Log" \
+            "" \
+            '```' \
+            "${LOG}" \
+            '```' \
+            "" \
+            "### Image" \
+            "" \
+            '```bash' \
+            "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}" \
+            '```' \
+            "" \
+            "> \`latest\` tag always points to the most recent release." \
+            > release-body.txt
 
       - name: Create Git Tag
         run: |
