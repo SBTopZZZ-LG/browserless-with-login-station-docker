@@ -65,7 +65,7 @@ jobs:
         id: check_tag
         run: |
           TAG="${{ steps.read.outputs.tag }}"
-          if git rev-parse "$TAG^{tag}" >/dev/null 2>&1; then
+          if git rev-parse --verify --tags "$TAG" >/dev/null 2>&1; then
             echo "tag_exists=true" >> $GITHUB_OUTPUT
             echo "Tag $TAG already exists — skipping release"
           else
