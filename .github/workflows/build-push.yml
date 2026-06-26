@@ -56,7 +56,7 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION"
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Fetch all tags
         run: git fetch --tags --force
@@ -66,12 +66,12 @@ jobs:
         run: |
           TAG="${{ steps.read.outputs.tag }}"
           if git rev-parse "$TAG^{tag}" >/dev/null 2>&1; then
-            echo "tag_exists=true"
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
             echo "Tag $TAG already exists — skipping release"
           else
-            echo "tag_exists=false"
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
             echo "Tag $TAG does not exist — will release"
-          fi >> $GITHUB_OUTPUT
+          fi
 
       - name: Find previous version tag
         id: commits
