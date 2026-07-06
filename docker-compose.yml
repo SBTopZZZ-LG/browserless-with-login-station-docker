@@ -194,8 +194,8 @@ services:
       - ./nginx/proxy-headers.conf:/etc/nginx/proxy-headers.conf:ro
       - ./setup.sh:/setup.sh:ro
       # Mount SSL certificates if USE_SSL=true
-      ${SSL_CERT_MOUNT:-}
-      ${SSL_KEY_MOUNT:-}
+      - ${SSL_CERT_MOUNT:-}
+      - ${SSL_KEY_MOUNT:-}
 
     entrypoint: ["/setup.sh"]
     depends_on:
