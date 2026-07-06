@@ -11,6 +11,8 @@
 README.md
 LICENSE
 *.md
+docker-compose.yml
+docker-compose.prod.yml
 
 # Editor
 .vscode/

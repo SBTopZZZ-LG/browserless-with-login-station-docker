@@ -1,30 +1,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Browserless + Login Station — docker-compose.yml
+# Browserless + Login Station — docker-compose.prod.yml
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Uses the pre-built GHCR image for login-station.
-# For local builds, use: docker compose -f docker-compose.prod.yml up -d
+# Builds the login-station image locally from Dockerfile.login-station.
+# Use this when you need to customize or debug the image build.
 #
-# Two modes:
-#
-#   LOCAL DEV  (USE_SSL=false, default)
-#     → No SSL/TLS, no nginx. Direct HTTP access via localhost.
-#     → Browserless: http://127.0.0.1:3000
-#     → Login UI:   http://127.0.0.1:3100
-#     → Scrape API: http://127.0.0.1:3100/scrape
-#
-#   PRODUCTION (USE_SSL=true)
-#     → nginx reverse proxy with TLS termination
-#     → Configure DOMAIN + SSL_CERT_PATH + SSL_KEY_PATH in .env
-#     → Routes: https://login.DOMAIN, https://scrape.DOMAIN,
-#               https://browserless.DOMAIN
-#
-# Usage:
-#   cp .env.example .env
-#   # Edit .env — set USE_SSL=true and fill in DOMAIN/SSL paths for prod
+# For most users, the default docker-compose.yml (pre-built GHCR image) is
+# simpler and faster:
 #   docker compose up -d
-#   # Open http://127.0.0.1:3100 → sign into any site via KasmVNC
-#   # Then use browserless at http://127.0.0.1:3000 with Playwright/MCP
+#
+# Usage with this file:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml build login-station
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -108,7 +95,14 @@ services:
 
   # ── Login Station (KasmVNC + auth-proxy) ─────────────────────────────────
   login-station:
-    image: ghcr.io/SBTopZZZ-LG/browserless-with-login-station-docker:latest
+    # Build args for OCI image labels (used by CI when pushing to GHCR)
+    build:
+      context: .
+      dockerfile: Dockerfile.login-station
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
+        - VCS_REF=${VCS_REF:-local}
+        - GITHUB_REPO=${GITHUB_REPO:-local}
     container_name: login-station
     restart: unless-stopped
 
@@ -158,7 +152,7 @@ services:
 
   # ── Nginx reverse proxy (production only) ───────────────────────────────
   # Only started when USE_SSL=true. Start with:
-  #   docker compose --profile ssl up -d
+  #   docker compose -f docker-compose.prod.yml --profile ssl up -d
   nginx-proxy:
     image: nginx:alpine
     container_name: nginx-proxy

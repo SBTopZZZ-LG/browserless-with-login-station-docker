@@ -53,23 +53,19 @@ cp .env.example .env
 
 **That's it for local development** — `USE_SSL=false` is the default. Everything runs on `127.0.0.1` with plain HTTP.
 
-### 3. Build the login-station image
-
-```bash
-docker compose build login-station
-```
-
-### 4. Start everything
+### 3. Start everything
 
 ```bash
 docker compose up -d
 ```
 
-### 5. Sign in
+This pulls the pre-built `login-station` image from GHCR — no build step needed.
+
+### 4. Sign in
 
 Open `http://127.0.0.1:3100` in your browser → log into any site (LinkedIn, GitHub, etc.) → wait a few seconds for cookies to settle.
 
-### 6. Test authenticated scraping
+### 5. Test authenticated scraping
 
 ```bash
 # Via auth-proxy scrape API
@@ -79,6 +75,20 @@ curl -X POST http://127.0.0.1:3100/scrape \
 
 # Via browserless headless API (Playwright-compatible WS)
 # Connect to ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
+```
+
+---
+
+## Building Locally
+
+If you need to customize or debug the `login-station` image, use `docker-compose.prod.yml` which builds from `Dockerfile.login-station`:
+
+```bash
+# Build the image
+docker compose -f docker-compose.prod.yml build login-station
+
+# Start everything
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ---
@@ -100,11 +110,14 @@ SSL_KEY_PATH=/path/to/privkey.pem
 Then start with the `ssl` profile:
 
 ```bash
-# Build image
-docker compose build login-station
-
 # Start all services including nginx (TLS on 80/443)
 docker compose --profile ssl up -d
+```
+
+If building locally instead of using the GHCR image:
+
+```bash
+docker compose -f docker-compose.prod.yml --profile ssl up -d
 ```
 
 Create DNS A records pointing to your server for `login.`, `scrape.`, and `browserless.` subdomains, then generate SSL certificates (e.g. Let's Encrypt with DNS-01 challenge).
@@ -281,8 +294,8 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 
 ```
 .
-├── docker-compose.yml              # Main compose — local dev + production modes
-│                                 # Start with --profile ssl for HTTPS
+├── docker-compose.yml              # Default — uses pre-built GHCR image
+├── docker-compose.prod.yml         # Local build — builds from Dockerfile.login-station
 ├── Dockerfile.login-station       # Custom image: linuxserver/chromium + auth-proxy
 ├── setup.sh                       # nginx entrypoint — picks HTTP or HTTPS config
 ├── auth-proxy/
@@ -349,14 +362,18 @@ The current `version.txt` is `1.0.0`. The workflow that just ran on this push wi
 
 ### Using the GHCR image
 
-In your `docker-compose.yml`, comment out the `build:` block on the `login-station` service and uncomment the `image:` line with your GHCR URL:
+The default `docker-compose.yml` already uses the pre-built GHCR image:
 
 ```yaml
 login-station:
-  # build:
-  #   context: .
-  #   dockerfile: Dockerfile.login-station
-  image: ghcr.io/YOUR_HANDLE/browserless-login-station:latest
+  image: ghcr.io/SBTopZZZ-LG/browserless-with-login-station-docker:latest
+```
+
+To pin a specific version, update the tag in `docker-compose.yml`:
+
+```yaml
+login-station:
+  image: ghcr.io/SBTopZZZ-LG/browserless-with-login-station-docker:1.0.0
 ```
 
 ---
