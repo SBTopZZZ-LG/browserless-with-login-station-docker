@@ -193,9 +193,10 @@ services:
       - ./nginx/nginx.conf.https:/etc/nginx/nginx.conf.https:ro
       - ./nginx/proxy-headers.conf:/etc/nginx/proxy-headers.conf:ro
       - ./setup.sh:/setup.sh:ro
-      # Mount SSL certificates if USE_SSL=true
-      - ${SSL_CERT_MOUNT:-}
-      - ${SSL_KEY_MOUNT:-}
+      # SSL certificates — set SSL_CERT_PATH / SSL_KEY_PATH in .env to host paths.
+      # Mounted to fixed paths inside the container; nginx references those fixed paths.
+      - ${SSL_CERT_PATH:-/etc/nginx/ssl/cert.pem}:/etc/nginx/ssl/cert.pem:ro
+      - ${SSL_KEY_PATH:-/etc/nginx/ssl/key.pem}:/etc/nginx/ssl/key.pem:ro
 
     entrypoint: ["/setup.sh"]
     depends_on:

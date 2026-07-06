@@ -12,15 +12,14 @@ TEMPLATE_HTTPS="/etc/nginx/nginx.conf.https"
 if [[ "${USE_SSL}" == "true" ]]; then
     echo "[setup] USE_SSL=true — generating HTTPS nginx config"
 
-    if [[ -z "${SSL_CERT_PATH}" || -z "${SSL_KEY_PATH}" ]]; then
-        echo "[setup] ERROR: USE_SSL=true but SSL_CERT_PATH / SSL_KEY_PATH are not set"
-        exit 1
-    fi
+    CERT="/etc/nginx/ssl/cert.pem"
+    KEY="/etc/nginx/ssl/key.pem"
 
-    if [[ ! -f "${SSL_CERT_PATH}" || ! -f "${SSL_KEY_PATH}" ]]; then
-        echo "[setup] ERROR: SSL certificate files not found:"
-        echo "[setup]   SSL_CERT_PATH=${SSL_CERT_PATH}"
-        echo "[setup]   SSL_KEY_PATH=${SSL_KEY_PATH}"
+    if [[ ! -f "${CERT}" || ! -f "${KEY}" ]]; then
+        echo "[setup] ERROR: SSL certificate files not found inside container:"
+        echo "[setup]   ${CERT}"
+        echo "[setup]   ${KEY}"
+        echo "[setup] Set SSL_CERT_PATH and SSL_KEY_PATH in .env to host paths"
         exit 1
     fi
 
