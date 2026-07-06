@@ -366,7 +366,7 @@ The default `docker-compose.yml` already uses the pre-built GHCR image:
 
 ```yaml
 login-station:
-  image: ghcr.io/SBTopZZZ-LG/browserless-with-login-station-docker:latest
+  image: ghcr.io/sbtopzzz-lg/browserless-with-login-station-docker:latest
 ```
 
 To pin a specific version, update the tag in `docker-compose.yml`:

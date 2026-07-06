@@ -108,7 +108,7 @@ services:
 
   # ── Login Station (KasmVNC + auth-proxy) ─────────────────────────────────
   login-station:
-    image: ghcr.io/SBTopZZZ-LG/browserless-with-login-station-docker:latest
+    image: ghcr.io/sbtopzzz-lg/browserless-with-login-station-docker:latest
     container_name: login-station
     restart: unless-stopped
 
