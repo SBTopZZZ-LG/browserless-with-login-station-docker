@@ -88,7 +88,8 @@ curl -X POST http://127.0.0.1:3100/scrape \
 
 | Service | Container port | Host port (default) |
 |---------|---------------|---------------------|
-| login-station (auth-proxy + KasmVNC) | 3100 | `127.0.0.1:3100` |
+| login-station (KasmVNC) | 3000 | `127.0.0.1:3001` |
+| login-station (auth-proxy) | 3100 | `127.0.0.1:3100` |
 | login-station (CDP WS proxy) | 9224 | `127.0.0.1:9224` |
 | browserless (headless API) | 3000 | `127.0.0.1:3000` |
 | nginx (production only) | 80/443 | 80/443 |

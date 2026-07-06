@@ -107,7 +107,9 @@ services:
     restart: unless-stopped
 
     ports:
-      # Auth-proxy scrape API + KasmVNC web UI (same port inside container)
+      # KasmVNC web UI (browser you sign into)
+      - "${KASMVNC_HOST_PORT:-127.0.0.1:3001}:3000"
+      # Auth-proxy scrape API
       - "${AUTH_PROXY_HOST_PORT:-127.0.0.1:3100}:3100"
       # CDP WebSocket proxy — browserless connects here for session inheritance
       - "${CDP_HOST_PORT:-127.0.0.1:9224}:9224"

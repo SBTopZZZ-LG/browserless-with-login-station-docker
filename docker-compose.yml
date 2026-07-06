@@ -9,9 +9,9 @@
 #
 #   LOCAL DEV  (USE_SSL=false, default)
 #     → No SSL/TLS, no nginx. Direct HTTP access via localhost.
+#     → KasmVNC:     http://127.0.0.1:3001
 #     → Browserless: http://127.0.0.1:3000
-#     → Login UI:   http://127.0.0.1:3100
-#     → Scrape API: http://127.0.0.1:3100/scrape
+#     → Scrape API:  http://127.0.0.1:3100/scrape
 #
 #   PRODUCTION (USE_SSL=true)
 #     → nginx reverse proxy with TLS termination
@@ -113,7 +113,9 @@ services:
     restart: unless-stopped
 
     ports:
-      # Auth-proxy scrape API + KasmVNC web UI (same port inside container)
+      # KasmVNC web UI (browser you sign into)
+      - "${KASMVNC_HOST_PORT:-127.0.0.1:3001}:3000"
+      # Auth-proxy scrape API
       - "${AUTH_PROXY_HOST_PORT:-127.0.0.1:3100}:3100"
       # CDP WebSocket proxy — browserless connects here for session inheritance
       - "${CDP_HOST_PORT:-127.0.0.1:9224}:9224"

@@ -63,7 +63,7 @@ This pulls the pre-built `login-station` image from GHCR — no build step neede
 
 ### 4. Sign in
 
-Open `http://127.0.0.1:3100` in your browser → log into any site (LinkedIn, GitHub, etc.) → wait a few seconds for cookies to settle.
+Open `http://127.0.0.1:3001` in your browser → log into any site (LinkedIn, GitHub, etc.) → wait a few seconds for cookies to settle.
 
 ### 5. Test authenticated scraping
 
@@ -130,7 +130,8 @@ Create DNS A records pointing to your server for `login.`, `scrape.`, and `brows
 
 | Port | Service | Description |
 |------|---------|-------------|
-| 3100 | KasmVNC + Auth-Proxy | Web UI + authenticated scrape API |
+| 3001 | KasmVNC | Web UI — sign into sites here |
+| 3100 | Auth-Proxy | Scrape API + health check |
 | 9224 | CDP WS Proxy | WebSocket tunnel to Chrome (for `CONNECTION_WS_ENDPOINT`) |
 
 ### Browserless (`browserless`)
@@ -240,7 +241,8 @@ browserless  IN CNAME  your-server.
 | `DISPLAY_HEIGHT` | 1080 | KasmVNC display height |
 | `BROWSERLESS_CONCURRENT` | 5 | Max concurrent browser sessions |
 | `BROWSERLESS_TIMEOUT` | 600000 | Session timeout (ms) |
-| `AUTH_PROXY_HOST_PORT` | `127.0.0.1:3100` | Host port for auth-proxy / KasmVNC |
+| `KASMVNC_HOST_PORT` | `127.0.0.1:3001` | Host port for KasmVNC web UI |
+| `AUTH_PROXY_HOST_PORT` | `127.0.0.1:3100` | Host port for auth-proxy scrape API |
 | `CDP_HOST_PORT` | `127.0.0.1:9224` | Host port for CDP WebSocket proxy |
 | `BROWSERLESS_HOST_PORT` | `127.0.0.1:3000` | Host port for browserless headless API |
 
@@ -260,6 +262,9 @@ docker logs browserless --tail 50
 
 # Check nginx logs (when USE_SSL=true)
 docker logs nginx-proxy --tail 50
+
+# Verify KasmVNC is running
+curl -s http://127.0.0.1:3001 | head -5
 
 # Verify Chrome CDP is reachable from auth-proxy
 curl http://127.0.0.1:9224/json/version | python3 -m json.tool
