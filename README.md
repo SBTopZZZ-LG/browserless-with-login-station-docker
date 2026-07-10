@@ -200,6 +200,29 @@ ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
 
 ---
 
+## AI Agent Integration (MCP)
+
+Connect an AI coding agent (GitHub Copilot, Claude, Cursor, etc.) to your authenticated Chrome instance via the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). The agent can then navigate pages, read content, and interact with sites using the sessions you signed into via KasmVNC.
+
+Add this to your MCP client's configuration (e.g. VS Code `mcp.json`, Claude Desktop config):
+
+```json
+"playwright": {
+  "command": "npx",
+  "args": [
+    "-y",
+    "@playwright/mcp@latest",
+    "--cdp-endpoint",
+    "http://localhost:9224/",
+    "--snapshot-mode=none"
+  ]
+}
+```
+
+This points the Playwright MCP server at the CDP WebSocket proxy on `login-station`. Any page the agent opens inherits your authenticated sessions — no extra setup needed.
+
+---
+
 ## Nginx Setup (built-in, production mode)
 
 nginx is included in this repo as a containerized reverse proxy. It is **only started when `USE_SSL=true`** (`--profile ssl`).
