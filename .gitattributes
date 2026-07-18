@@ -1,0 +1,15 @@
+# Force LF line endings for files that must be Unix-compatible.
+# Prevents CRLF issues that break shell scripts in Docker containers.
+
+# Shell scripts and s6 service files
+*.sh        text eol=lf
+docker/**   text eol=lf
+
+# Dockerfiles, Compose files, nginx configs
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+nginx/**    text eol=lf
+
+# JavaScript — auth-proxy runs inside Linux containers
+*.js        text eol=lf
+*.json      text eol=lf

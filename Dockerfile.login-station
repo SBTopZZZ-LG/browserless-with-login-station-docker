@@ -50,6 +50,12 @@ COPY auth-proxy/auth-proxy.js ./
 # s6-rc type=longrun → managed like a daemon, logs to /var/log/s6-rc.
 # dependencies.d/svc-de → ensures auth-proxy starts AFTER Chrome is up.
 COPY docker/s6-auth-proxy /etc/s6-overlay/s6-rc.d/svc-auth-proxy/
+
+# Strip CRLF → LF from shell scripts (safety net for Windows checkout).
+# CRLF in shebangs causes "unable to exec bash" at runtime.
+RUN find /etc/s6-overlay/s6-rc.d/svc-auth-proxy -type f \
+      -exec sed -i 's/\r$//' {} +
+
 RUN touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-auth-proxy
 
 EXPOSE 3100 9224
