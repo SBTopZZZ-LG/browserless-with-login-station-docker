@@ -311,6 +311,35 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 - Make sure you signed into the site via `login.YOUR_DOMAIN` (KasmVNC), not the browserless headless API
 - Wait ~5s after signing in for cookies to fully settle before scraping
 
+### Playwright errors: `page.goto: timeout: expected float, got undefined` / handshake `KeyError: 'selectors'`
+These come from a **Playwright client/server protocol-version mismatch**, not a network issue.
+
+The `browserless` container bundles a set of Playwright *server-side* drivers and only accepts clients whose
+version falls inside that range. Your **client version must be within the image's bundled range**:
+
+- Connect with a client **outside** that range and you'll see exactly these failures:
+  - client **newer** than the newest bundled driver → `page.goto: timeout: expected float, got undefined`
+  - client **older** than the oldest bundled driver → handshake fails with `KeyError: 'selectors'`
+
+To fix:
+
+1. **Keep the image current.** The `:latest` tag is rebuilt frequently and the bundled driver range follows it.
+   If you've been running the same image for a while, pull the newest one (an old image can lag behind your client):
+   ```bash
+   docker compose pull browserless
+   docker compose up -d browserless
+   ```
+2. **Pin your client to a version inside the image's current bundled range.** As of the 2026-09 image update the
+   range is **Playwright 1.59 – 1.62** (pin client to `1.62.x`). Verify what's bundled at runtime:
+   ```bash
+   docker exec browserless sh -c 'ls -d /usr/src/app/node_modules/playwright-*'
+   ```
+3. Re-test: `goto`/`reload` should succeed.
+
+> Note: `fetch()` from a page to a *cross-origin* host returns `TypeError: Failed to fetch` when the target doesn't
+> send `Access-Control-Allow-Origin` — that's normal browser CORS, not an egress fault. Same-origin fetches and
+> normal navigation (`.goto()`) are unaffected.
+
 ### Feed pages returning "Something went wrong"
 - Many sites (LinkedIn, Twitter/X) are heavily client-side rendered
 - Try increasing `waitAfter` to 8000–12000ms and `waitUntil: "networkidle0"`
