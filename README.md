@@ -198,6 +198,41 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \
 ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
 ```
 
+> **Note on sessions:** the browserless container runs an **isolated** headless Chrome. In
+> current browserless versions (v2.56.7) it does **not** inherit the login-station's
+> authenticated sessions (the old `CONNECTION_WS_ENDPOINT` session-sharing is a no-op). For
+> authenticated scraping look at the Playwright + CDP recipe below.
+
+### Authenticated scraping with Playwright (recommended)
+
+Point Playwright straight at the **login-station Chrome** (via its CDP proxy) and you get full
+Playwright control **with** the signed-in sessions you set up via the login UI — no cookie
+extraction, no sharing hack:
+
+```python
+from playwright.async_api import async_playwright
+
+async with async_playwright() as pw:
+    # Local (on the host):          "http://127.0.0.1:9224"
+    # Remote (Tailnet / via nginx): "https://login.browserless.saumitra1912.com"
+    browser = await pw.chromium.connect_over_cdp("https://login.browserless.saumitra1912.com")
+
+    ctx = browser.contexts[0]          # the login-station Chrome (already signed in)
+    page = await ctx.new_page()        # new tabs share the auth session
+    await page.goto("https://www.linkedin.com/feed/")
+    # ... scrape authenticated content ...
+
+    # ...or read the already-open, logged-in tabs directly:
+    for p in ctx.pages:
+        print(p.url, (await p.title()))
+```
+
+- The login-station Chrome listens on CDP proxy port `9224` (host) — the same port used for the
+  legacy `CONNECTION_WS_ENDPOINT` value.
+- On a Tailnet-only box this is exposed over your nginx reverse proxy so `login.YOUR_DOMAIN`
+  doubles as the CDP endpoint (see `nginx/` templates: `/json` + `/devtools/` locations).
+- Any device on the Tailnet can connect, so keep the Tailnet trusted.
+
 ---
 
 ## AI Agent Integration (MCP)
