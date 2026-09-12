@@ -32,7 +32,11 @@ services:
 
   # ── Browserless (Headless Chrome API) ───────────────────────────────────
   browserless:
-    image: ghcr.io/browserless/chromium:latest
+    # Pin the browserless app version (NOT :latest) — the bundled Playwright
+    # drivers follow the release, so a pinned version keeps client/server
+    # protocol versions deterministic. Client must be within the range this
+    # image bundles (v2.56.7 ships Playwright drivers 1.59-1.62).
+    image: ghcr.io/browserless/chromium:v2.56.7
     container_name: browserless
     restart: unless-stopped
 
