@@ -2,26 +2,26 @@
 
 ## Project overview
 
-Docker-based system for authenticated web scraping. Two containers share the **same Chrome instance** via CDP:
+Docker-based system for authenticated web scraping. A single `login-station` container holds the Chrome instance; external clients drive it via CDP:
 
 - **`login-station`** — KasmVNC browser (user signs in via web UI) + auth-proxy (Node.js scrape API + WS proxy)
-- **`browserless`** — Headless Chrome API that inherits sessions from login-station
 - **`nginx-proxy`** — Reverse proxy, only used in production (`--profile ssl`)
 
-Key insight: Chromium v120+ encrypts cookies with AES-256-GCM. Cookie extraction is impossible. Instead, both containers share the same Chrome process, so sessions are inherited automatically via CDP.
+Key insight: Chromium v120+ encrypts cookies with AES-256-GCM. Cookie extraction is impossible. Instead, CDP clients drive the same Chrome process, so sessions are inherited automatically via CDP.
+
+Chrome auto-restart: the base image's `svc-watchdog` relaunches Chrome if its process exits, but only when `RESTART_APP=true` (set in compose, default true). Never send `Browser.close` over the shared CDP session — close only your own pages.
 
 ## Architecture
 
 ### Container communication
 
 ```
-Browserless (:3000) --ws--> Login Station (:9224 CDP WS proxy) --> Chrome (:9222)
+Playwright/MCP (:9224 CDP WS proxy) --> Chrome (:9222, same process)
 KasmVNC user --> Chrome (:9222) --> auth-proxy scrape API (:3100)
 ```
 
-- `login-station` runs Chrome (port 9222) and auth-proxy (port 3100) as s6-overlay managed services
+- `login-station` runs Chrome (port 9222, via desktop autostart + `svc-watchdog`) and auth-proxy (port 3100) as s6-overlay managed services
 - auth-proxy exposes a CDP WebSocket proxy on port 9224 that rewrites Chrome's WS URLs so external clients can connect through it
-- `browserless` connects to `ws://login-station:9224/` via `CONNECTION_WS_ENDPOINT`
 
 ### Auth-proxy details
 
@@ -35,7 +35,6 @@ KasmVNC user --> Chrome (:9222) --> auth-proxy scrape API (:3100)
 ```bash
 # Local dev (no SSL)
 cp .env.example .env
-# Edit .env — at minimum set BROWSERLESS_TOKEN=$(openssl rand -hex 32)
 docker compose build login-station
 docker compose up -d
 
@@ -44,13 +43,12 @@ docker compose up -d
 docker compose --profile ssl up -d
 
 # Check containers
-docker ps --filter "name=browserless,login-station"
+docker ps --filter "name=login-station"
 docker logs login-station --tail 50
-docker logs browserless --tail 50
 
 # Health checks
 curl http://127.0.0.1:3100/health
-curl -H "Authorization: Bearer $BROWSERLESS_TOKEN" http://127.0.0.1:3000/pressure
+curl http://127.0.0.1:9224/json/version | python3 -m json.tool
 
 # Test scrape (POST returns JSON with html/title/finalUrl)
 curl -X POST http://127.0.0.1:3100/scrape \
@@ -72,10 +70,9 @@ curl -X POST http://127.0.0.1:3100/scrape \
 - Base image: `lscr.io/linuxserver/chromium:latest` (linuxserver conventions apply)
 - s6-overlay service at `docker/s6-auth-proxy/` — must have `type` file (`longrun`) and `dependencies.d/` dir
 - `login-station` requires `--security-opt seccomp=unconfined` and `group_add: "105"` (video group) — removing these causes blank/black KasmVNC screen
-- `shm_size: 1gb` on both browserless and login-station containers
+- `shm_size: 1gb` on the login-station container
 - `node_modules/` excluded from Docker build context via `.dockerignore` (npm install happens in Dockerfile)
 - `.env` is never baked into images — `.dockerignore` excludes it
-- `CONNECTION_WS_ENDPOINT` defaults to `ws://login-station:9224/` — override to `wss://login-station:9224/` in `.env` when using SSL/nginx
 
 ## nginx
 
@@ -91,14 +88,13 @@ curl -X POST http://127.0.0.1:3100/scrape \
 | login-station (KasmVNC) | 3000 | `127.0.0.1:3001` |
 | login-station (auth-proxy) | 3100 | `127.0.0.1:3100` |
 | login-station (CDP WS proxy) | 9224 | `127.0.0.1:9224` |
-| browserless (headless API) | 3000 | `127.0.0.1:3000` |
 | nginx (production only) | 80/443 | 80/443 |
 
 ## Gotchas
 
 - auth-proxy must wait for Chrome CDP to be ready (up to 90s) before it can serve requests — the s6 run script handles this with a curl poll loop
 - "No webSocketDebuggerUrl" error means Chrome CDP isn't ready yet
-- Sessions not authenticated? Make sure you signed into the site via KasmVNC (login.YOUR_DOMAIN), not the browserless API
+- Sessions not authenticated? Make sure you signed into the site via KasmVNC (login.YOUR_DOMAIN) and the CDP client opened a page in that same Chrome
 - Feed pages (LinkedIn, Twitter/X) are heavily client-side rendered — increase `waitAfter` to 8000-12000ms and use `waitUntil: "networkidle0"`
 - `PUBLIC_URL_SCHEME` env var controls auth-proxy response headers (`http` or `https`)
 - No test suite, no linting, no build step for auth-proxy (just `npm install` + `node auth-proxy.js`)

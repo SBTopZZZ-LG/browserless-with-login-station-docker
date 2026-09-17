@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Browserless + Login Station — docker-compose.yml
+# Login Station — docker-compose.yml
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Uses the pre-built GHCR image for login-station.
@@ -10,105 +10,24 @@
 #   LOCAL DEV  (USE_SSL=false, default)
 #     → No SSL/TLS, no nginx. Direct HTTP access via localhost.
 #     → KasmVNC:     http://127.0.0.1:3001
-#     → Browserless: http://127.0.0.1:3000
 #     → Scrape API:  http://127.0.0.1:3100/scrape
+#     → CDP:         http://127.0.0.1:9224 (connect_over_cdp)
 #
 #   PRODUCTION (USE_SSL=true)
 #     → nginx reverse proxy with TLS termination
 #     → Configure DOMAIN + SSL_CERT_PATH + SSL_KEY_PATH in .env
-#     → Routes: https://login.DOMAIN, https://scrape.DOMAIN,
-#               https://browserless.DOMAIN
+#     → Routes: https://login.DOMAIN, https://scrape.DOMAIN
 #
 # Usage:
 #   cp .env.example .env
 #   # Edit .env — set USE_SSL=true and fill in DOMAIN/SSL paths for prod
 #   docker compose up -d
-#   # Open http://127.0.0.1:3100 → sign into any site via KasmVNC
-#   # Then use browserless at http://127.0.0.1:3000 with Playwright/MCP
+#   # Open http://127.0.0.1:3001 → sign into any site via KasmVNC
+#   # Then drive the same Chrome via CDP with Playwright/MCP
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
-  # ── Browserless (Headless Chrome API) ───────────────────────────────────
-  browserless:
-    # Pin the browserless app version (NOT :latest) — the bundled Playwright
-    # drivers follow the release, so a pinned version keeps client/server
-    # protocol versions deterministic. Client must be within the range this
-    # image bundles (v2.56.7 ships Playwright drivers 1.59-1.62).
-    image: ghcr.io/browserless/chromium:v2.56.7
-    container_name: browserless
-    restart: unless-stopped
-
-    # Always expose on localhost — direct HTTP when no SSL,
-    # or as upstream for nginx when SSL is active
-    ports:
-      - "${BROWSERLESS_HOST_PORT:-127.0.0.1:3000}:3000"
-
-    environment:
-      - HOST=0.0.0.0
-      - PORT=3000
-      - TOKEN=${BROWSERLESS_TOKEN:-}
-
-      # CDP WebSocket endpoint — inherits sessions from login-station Chrome
-      # Protocol switches between ws:// (local) and wss:// (SSL/production)
-      - CONNECTION_WS_ENDPOINT=${CONNECTION_WS_ENDPOINT:-ws://login-station:9224/}
-
-      # External URL — tells browserless its public facing URL
-      - EXTERNAL=${BROWSERLESS_EXTERNAL_URL:-http://127.0.0.1:3000}
-
-      # Session limits
-      - CONCURRENT=${BROWSERLESS_CONCURRENT:-5}
-      - MAX_CONCURRENT_SESSIONS=${BROWSERLESS_MAX_SESSIONS:-5}
-      - QUEUED=${BROWSERLESS_QUEUED:-10}
-      - MAX_QUEUE_LENGTH=${BROWSERLESS_MAX_QUEUE:-10}
-      - TIMEOUT=${BROWSERLESS_TIMEOUT:-600000}
-
-      # Keep Chrome alive between requests for faster reuse
-      - KEEP_ALIVE=true
-      - CHROME_REFRESH_TIME=3600000
-
-      # Health checks
-      - HEALTH=true
-      - PRE_REQUEST_HEALTH_CHECK=true
-
-      # Resource limits
-      - MAX_MEMORY_PERCENT=${BROWSERLESS_MAX_MEMORY:-80}
-      - MAX_CPU_PERCENT=${BROWSERLESS_MAX_CPU:-80}
-
-      # Directories
-      - DOWNLOAD_DIR=/downloads
-      - DATA_DIR=/user_data
-
-      # Logging
-      - LOG_LEVEL=info
-      - DEBUG=browserless*,-**:verbose
-
-    volumes:
-      - browserless_downloads:/downloads
-      - browserless_data:/user_data
-
-    networks:
-      - login-station-net
-
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
-
-    cap_add:
-      - SYS_ADMIN
-
-    shm_size: 1gb
-
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c 'cat < /dev/null > /dev/tcp/localhost/3000' && exit 0 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
 
   # ── Login Station (KasmVNC + auth-proxy) ─────────────────────────────────
   login-station:
@@ -121,7 +40,7 @@ services:
       - "${KASMVNC_HOST_PORT:-127.0.0.1:3001}:3000"
       # Auth-proxy scrape API
       - "${AUTH_PROXY_HOST_PORT:-127.0.0.1:3100}:3100"
-      # CDP WebSocket proxy — browserless connects here for session inheritance
+      # CDP WebSocket proxy — external CDP clients connect here
       - "${CDP_HOST_PORT:-127.0.0.1:9224}:9224"
 
     environment:
@@ -135,6 +54,11 @@ services:
       - DISPLAY_HEIGHT=${DISPLAY_HEIGHT:-1080}
       - DISPLAY_REFRESH=${DISPLAY_REFRESH:-60}
       - DARK_MODE=${DARK_MODE:-true}
+
+      # Auto-restart Chrome if its process exits (e.g. CDP Browser.close,
+      # last-tab close, crash). Without this the watchdog service idles and
+      # a dead Chrome stays dead until container restart.
+      - RESTART_APP=${RESTART_APP:-true}
 
       # Auth-proxy port (matches s6 service env)
       - AUTH_PROXY_PORT=3100
@@ -180,12 +104,10 @@ services:
       - USE_SSL=${USE_SSL:-false}
       - LOGIN_DOMAIN=${LOGIN_DOMAIN:-login.localhost}
       - SCRAPE_DOMAIN=${SCRAPE_DOMAIN:-scrape.localhost}
-      - BROWSERLESS_DOMAIN=${BROWSERLESS_DOMAIN:-browserless.localhost}
       - SSL_CERT_PATH=${SSL_CERT_PATH:-}
       - SSL_KEY_PATH=${SSL_KEY_PATH:-}
       - KASMVNC_PORT=${KASMVNC_PORT:-3100}
       - AUTH_PROXY_PORT=${AUTH_PROXY_PORT:-3100}
-      - BROWSERLESS_PORT=${BROWSERLESS_PORT:-3000}
 
     volumes:
       - ./nginx/nginx.conf.http:/etc/nginx/nginx.conf.http:ro
@@ -200,8 +122,6 @@ services:
     entrypoint: ["/setup.sh"]
     depends_on:
       login-station:
-        condition: service_started
-      browserless:
         condition: service_started
 
     networks:
@@ -222,6 +142,4 @@ networks:
 
 
 volumes:
-  browserless_downloads:
-  browserless_data:
   login_station_config:

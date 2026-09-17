@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CDP-based authenticated scraping proxy for browserless login station",
+  "description": "CDP-based authenticated scraping proxy for the login station",
   "scripts": {
     "start": "node auth-proxy.js"
   },

@@ -12,8 +12,8 @@
  * automatically via CDP. No cookie extraction needed.
  *
  * CDP WebSocket proxy (port 9224):
- *   External clients (e.g. browserless CONNECTION_WS_ENDPOINT) can connect
- *   here to drive the SAME Chrome session. The proxy rewrites Chrome's WS URL
+ *   External CDP clients (Playwright, MCP, …) connect here to drive the
+ *   SAME Chrome session. The proxy rewrites Chrome's WS URL
  *   so clients connect back through it, enabling session sharing across
  *   containers on the same Docker network.
  *
@@ -150,7 +150,7 @@ app.get('/scrape', async (req, res) => {
 
 // ── CDP WebSocket Proxy ─────────────────────────────────────────────────────
 //
-// Allows external tools (e.g. browserless with CONNECTION_WS_ENDPOINT) to
+// Allows external tools (e.g. Playwright connect_over_cdp, MCP) to
 // connect to the login-station Chrome over WebSocket, inheriting sessions.
 //
 // HOW IT WORKS
@@ -160,7 +160,7 @@ app.get('/scrape', async (req, res) => {
 // rewrites the WS URLs to point to :CDP_PROXY (which IS reachable), and
 // then tunnels traffic from clients to Chrome.
 //
-//  External client (browserless)
+//  External client (Playwright / MCP)
 //        │
 //        ▼  HTTP GET /json/version
 //  ┌─────────────────────────────────┐
