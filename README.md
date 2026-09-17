@@ -1,13 +1,10 @@
-# Browserless with Login Station
+# Login Station
 
 **Authenticated web scraping via a Chrome instance you control — no cookie extraction needed.**
 
-Two containers that share the **same Chrome instance**:
+A single `login-station` container (KasmVNC browser + auth-proxy + CDP proxy) where you sign into any site manually. Drive that **same Chrome** over CDP with Playwright/MCP and the sessions come along automatically.
 
-- **`login-station`** — KasmVNC browser where you sign into any site manually
-- **`browserless`** — Headless Chrome API (Playwright-compatible) that inherits those sessions
-
-When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, the `browserless` API automatically uses the same authenticated session. No cookie extraction, no encryption hacks, no secret key management.
+When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, any CDP client connected to the station automatically uses the same authenticated session. No cookie extraction, no encryption hacks, no secret key management.
 
 ---
 
@@ -21,14 +18,13 @@ When you log into LinkedIn, GitHub, or any site via `login.YOUR_DOMAIN`, the `br
 
 Chromium v120+ encrypts cookies with AES-256-GCM using a key derived from your OS credential store. The SQLite `value` column is always empty — extracting cookies is impossible without that key.
 
-CDP bypasses this entirely: we connect directly to the Chrome instance that holds the decrypted session. Both containers share the same Chrome process, so sessions are inherited automatically.
+CDP bypasses this entirely: we connect directly to the Chrome instance that holds the decrypted session. CDP clients drive the same Chrome process, so sessions are inherited automatically.
 
 ---
 
 ## Prerequisites
 
 - **Docker** (v24+) with Docker Compose v2
-- **OpenSSL** — to generate a browserless token: `openssl rand -hex 32`
 
 No external nginx-proxy, no SSL certs, no DNS records needed for local development.
 
@@ -47,8 +43,6 @@ cd browserless-with-login-station-docker
 
 ```bash
 cp .env.example .env
-# At minimum set BROWSERLESS_TOKEN:
-#   BROWSERLESS_TOKEN=$(openssl rand -hex 32)
 ```
 
 **That's it for local development** — `USE_SSL=false` is the default. Everything runs on `127.0.0.1` with plain HTTP.
@@ -73,8 +67,9 @@ curl -X POST http://127.0.0.1:3100/scrape \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.linkedin.com/feed/","waitAfter":5000}'
 
-# Via browserless headless API (Playwright-compatible WS)
-# Connect to ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
+# Via login-station Chrome CDP (Playwright / MCP)
+# Connect to http://127.0.0.1:9224 with connect_over_cdp (see recipe below)
+curl http://127.0.0.1:9224/json/version | python3 -m json.tool
 ```
 
 ---
@@ -102,7 +97,6 @@ USE_SSL=true
 DOMAIN=yourdomain.com
 LOGIN_DOMAIN=login.yourdomain.com
 SCRAPE_DOMAIN=scrape.yourdomain.com
-BROWSERLESS_DOMAIN=browserless.yourdomain.com
 SSL_CERT_PATH=/path/to/fullchain.pem
 SSL_KEY_PATH=/path/to/privkey.pem
 ```
@@ -120,7 +114,7 @@ If building locally instead of using the GHCR image:
 docker compose -f docker-compose.prod.yml --profile ssl up -d
 ```
 
-Create DNS A records pointing to your server for `login.`, `scrape.`, and `browserless.` subdomains, then generate SSL certificates (e.g. Let's Encrypt with DNS-01 challenge).
+Create DNS A records pointing to your server for `login.` and `scrape.` subdomains, then generate SSL certificates (e.g. Let's Encrypt with DNS-01 challenge).
 
 ---
 
@@ -132,13 +126,9 @@ Create DNS A records pointing to your server for `login.`, `scrape.`, and `brows
 |------|---------|-------------|
 | 3001 | KasmVNC | Web UI — sign into sites here |
 | 3100 | Auth-Proxy | Scrape API + health check |
-| 9224 | CDP WS Proxy | WebSocket tunnel to Chrome (for `CONNECTION_WS_ENDPOINT`) |
+| 9224 | CDP WS Proxy | WebSocket tunnel to Chrome for Playwright/MCP (`connect_over_cdp`) |
 
-### Browserless (`browserless`)
-
-| Port | Service | Description |
-|------|---------|-------------|
-| 3000 | Browserless WS API | Headless Chrome for Playwright/MCP clients |
+Chrome auto-restarts if its process exits (`RESTART_APP=true` default) — a killed browser comes back with the same profile/sessions.
 
 ### Nginx (`nginx-proxy`) — production only
 
@@ -187,22 +177,6 @@ curl http://127.0.0.1:3100/health
 }
 ```
 
-### Browserless Headless API (Playwright-compatible)
-
-```bash
-# Health check (requires token)
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  http://127.0.0.1:3000/pressure
-
-# WebSocket — use with Playwright, MCP, or any CDP-compatible client
-ws://127.0.0.1:3000/playwright/chromium?token=YOUR_TOKEN
-```
-
-> **Note on sessions:** the browserless container runs an **isolated** headless Chrome. In
-> current browserless versions (v2.56.7) it does **not** inherit the login-station's
-> authenticated sessions (the old `CONNECTION_WS_ENDPOINT` session-sharing is a no-op). For
-> authenticated scraping look at the Playwright + CDP recipe below.
-
 ### Authenticated scraping with Playwright (recommended)
 
 Point Playwright straight at the **login-station Chrome** (via its CDP proxy) and you get full
@@ -227,9 +201,8 @@ async with async_playwright() as pw:
         print(p.url, (await p.title()))
 ```
 
-- The login-station Chrome listens on CDP proxy port `9224` (host) — the same port used for the
-  legacy `CONNECTION_WS_ENDPOINT` value.
-- On a Tailnet-only box this is exposed over your nginx reverse proxy so `login.YOUR_DOMAIN`
+- The login-station Chrome is reachable via the CDP proxy on host port `9224`.
+- On a Tailnet-only box this is exposed over your reverse proxy so `login.YOUR_DOMAIN`
   doubles as the CDP endpoint (see `nginx/` templates: `/json` + `/devtools/` locations).
 - Any device on the Tailnet can connect, so keep the Tailnet trusted.
 
@@ -276,7 +249,6 @@ Create A/CNAME records pointing to your server:
 ```
 login        IN CNAME  your-server.
 scrape       IN CNAME  your-server.
-browserless  IN CNAME  your-server.
 ```
 
 ---
@@ -289,34 +261,27 @@ browserless  IN CNAME  your-server.
 | `DOMAIN` | — | Top-level domain (used to build subdomain defaults) |
 | `LOGIN_DOMAIN` | `login.${DOMAIN}` | Subdomain for KasmVNC web UI |
 | `SCRAPE_DOMAIN` | `scrape.${DOMAIN}` | Subdomain for auth-proxy scrape API |
-| `BROWSERLESS_DOMAIN` | `browserless.${DOMAIN}` | Subdomain for browserless WS API |
 | `SSL_CERT_PATH` | — | Path to SSL fullchain.pem (required when `USE_SSL=true`) |
 | `SSL_KEY_PATH` | — | Path to SSL privkey.pem (required when `USE_SSL=true`) |
-| `BROWSERLESS_TOKEN` | *(set in .env)* | Secret token for browserless API auth |
+| `RESTART_APP` | `true` | Auto-restart Chrome if its process exits |
 | `PUID` / `PGID` | 1000 | User/group ID for file permissions |
 | `TZ` | `UTC` | Timezone |
 | `DISPLAY_WIDTH` | 1920 | KasmVNC display width |
 | `DISPLAY_HEIGHT` | 1080 | KasmVNC display height |
-| `BROWSERLESS_CONCURRENT` | 5 | Max concurrent browser sessions |
-| `BROWSERLESS_TIMEOUT` | 600000 | Session timeout (ms) |
 | `KASMVNC_HOST_PORT` | `127.0.0.1:3001` | Host port for KasmVNC web UI |
 | `AUTH_PROXY_HOST_PORT` | `127.0.0.1:3100` | Host port for auth-proxy scrape API |
 | `CDP_HOST_PORT` | `127.0.0.1:9224` | Host port for CDP WebSocket proxy |
-| `BROWSERLESS_HOST_PORT` | `127.0.0.1:3000` | Host port for browserless headless API |
 
 ---
 
 ## Troubleshooting
 
 ```bash
-# Check containers are running
-docker ps --filter "name=browserless,login-station"
+# Check the container is running
+docker ps --filter "name=login-station"
 
 # Check login station logs
 docker logs login-station --tail 50
-
-# Check browserless logs
-docker logs browserless --tail 50
 
 # Check nginx logs (when USE_SSL=true)
 docker logs nginx-proxy --tail 50
@@ -329,9 +294,6 @@ curl http://127.0.0.1:9224/json/version | python3 -m json.tool
 
 # Health check auth-proxy
 curl http://127.0.0.1:3100/health
-
-# Health check browserless
-curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 ```
 
 ### Login station returning blank / black screen
@@ -342,34 +304,17 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3000/pressure
 - Chrome CDP isn't ready yet — the s6 service waits up to 90s
 - Check: `docker logs login-station | grep "Chrome CDP ready"`
 
-### Browserless sessions not authenticated
-- Make sure you signed into the site via `login.YOUR_DOMAIN` (KasmVNC), not the browserless headless API
-- Wait ~5s after signing in for cookies to fully settle before scraping
+### Chrome keeps dying / CDP unreachable
+- The watchdog restarts Chrome automatically (`RESTART_APP=true` default) — check:
+  `docker logs login-station | grep -i watchdog`
+- If Chrome stays dead, make sure `RESTART_APP` wasn't overridden to `false`
+- **Never send `Browser.close` over the shared CDP session** — it terminates the
+  whole browser. Close only your own pages/tabs; the watchdog recovers if it happens.
 
-### Playwright errors: `page.goto: timeout: expected float, got undefined` / handshake `KeyError: 'selectors'`
-These come from a **Playwright client/server protocol-version mismatch**, not a network issue.
-
-The `browserless` container bundles a set of Playwright *server-side* drivers and only accepts clients whose
-version falls inside that range. Your **client version must be within the image's bundled range**:
-
-- Connect with a client **outside** that range and you'll see exactly these failures:
-  - client **newer** than the newest bundled driver → `page.goto: timeout: expected float, got undefined`
-  - client **older** than the oldest bundled driver → handshake fails with `KeyError: 'selectors'`
-
-To fix:
-
-1. **Keep the image current.** The `:latest` tag is rebuilt frequently and the bundled driver range follows it.
-   If you've been running the same image for a while, pull the newest one (an old image can lag behind your client):
-   ```bash
-   docker compose pull browserless
-   docker compose up -d browserless
-   ```
-2. **Pin your client to a version inside the image's current bundled range.** As of the 2026-09 image update the
-   range is **Playwright 1.59 – 1.62** (pin client to `1.62.x`). Verify what's bundled at runtime:
-   ```bash
-   docker exec browserless sh -c 'ls -d /usr/src/app/node_modules/playwright-*'
-   ```
-3. Re-test: `goto`/`reload` should succeed.
+### Playwright errors over direct CDP
+Client and server versions can drift (no bundled driver to pin against anymore). If you see
+protocol errors (`KeyError`, unexpected `undefined`), upgrade your Playwright client to a
+recent version matching the Chrome build in the station image.
 
 > Note: `fetch()` from a page to a *cross-origin* host returns `TypeError: Failed to fetch` when the target doesn't
 > send `Access-Control-Allow-Origin` — that's normal browser CORS, not an egress fault. Same-origin fetches and
@@ -473,4 +418,4 @@ login-station:
 ## Credits
 
 - Auth-proxy CDP scraping pattern inspired by browserless.io architecture
-- Base images: [linuxserver/chromium](https://docs.linuxserver.io/images/docker-chromium), [ghcr.io/browserless/chromium](https://github.com/browserless/chromium)
+- Base image: [linuxserver/chromium](https://docs.linuxserver.io/images/docker-chromium)
