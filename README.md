@@ -392,9 +392,9 @@ All version numbers live in **`version.txt`** at the repo root. The workflow rea
 
 ### First release
 
-The current `version.txt` is `1.0.0`. The workflow that just ran on this push will create:
-- GHCR image tagged `1.0.0` + `latest`
-- Git tag `v1.0.0`
+The current `version.txt` is `2.0.0`. The workflow that just ran on this push will create:
+- GHCR image tagged `2.0.0` + `latest`
+- Git tag `v2.0.0`
 - GitHub release with the commit log
 
 ### Using the GHCR image
